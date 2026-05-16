@@ -5,6 +5,41 @@ type Params = {
   params: Promise<{ token: string }>
 }
 
+// Khuyên dùng: chỉ campaign đang running mới nhận tracking
+const ACTIVE_CAMPAIGN_STATUS = ['running']
+
+async function canReceiveTracking(emailId: string) {
+  const { data: email, error: emailError } = await supabaseAdmin
+    .from('emails')
+    .select('campaign_id')
+    .eq('id', emailId)
+    .single()
+
+  console.log('[CLICK] email data =', email)
+  console.log('[CLICK] email error =', emailError)
+
+  if (emailError || !email?.campaign_id) {
+    return false
+  }
+
+  const { data: campaign, error: campaignError } = await supabaseAdmin
+    .from('campaigns')
+    .select('id, status')
+    .eq('id', email.campaign_id)
+    .single()
+
+  console.log('[CLICK] campaign data =', campaign)
+  console.log('[CLICK] campaign error =', campaignError)
+
+  if (campaignError || !campaign?.status) {
+    return false
+  }
+
+  const status = String(campaign.status).trim().toLowerCase()
+
+  return ACTIVE_CAMPAIGN_STATUS.includes(status)
+}
+
 export async function GET(req: NextRequest, context: Params) {
   try {
     const { token } = await context.params
@@ -21,6 +56,13 @@ export async function GET(req: NextRequest, context: Params) {
 
     if (!link?.original_url) {
       return NextResponse.redirect(new URL('/', req.url))
+    }
+
+    const allowedTracking = await canReceiveTracking(link.email_id)
+
+    if (!allowedTracking) {
+      console.log('[CLICK] tracking blocked because campaign is not running')
+      return NextResponse.redirect(link.original_url)
     }
 
     const now = new Date().toISOString()
